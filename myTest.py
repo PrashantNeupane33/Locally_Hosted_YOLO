@@ -1,27 +1,56 @@
 from ultralytics import YOLO
 import cv2 as cv
+import depthai as dai
 
 model = YOLO("/home/pnnp/Downloads/best.pt")
-capture = cv.VideoCapture(0)
 
-while True:
-    isTrue, frame = capture.read()
-    results = model(frame)
 
-    if len(results[0].boxes) > 0:
-        bbx = results[0].boxes.cpu().numpy().xywh
-        if bbx.shape[0] > 0:
-            x, y, w, h = bbx[0]
-            cv.rectangle(results[0].orig_img, (int(x-w/2), int(y-h/2)),
-                         (int(x+w/2), int(y+h/2)), (0, 255, 0), 2)
+def rescale(frame, scale):
+    w = int(frame.shape[1]*scale)
+    h = int(frame.shape[0]*scale)
+    return cv.resize(frame, (w, h), interpolation=cv.INTER_AREA)
+
+
+# Creating a Pipeline
+pipeline = dai.Pipeline()
+
+# Defining Nodes
+camRgb = pipeline.create(dai.node.ColorCamera)
+xoutRgb = pipeline.create(dai.node.XLinkOut)
+xoutRgb.setStreamName("rgb")
+
+# Nodes Properties
+camRgb.setPreviewSize(600, 600)
+camRgb.setInterleaved(False)
+camRgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.RGB)
+
+# Linking Nodes
+camRgb.preview.link(xoutRgb.input)
+
+# Starting the pipeline
+with dai.Device(pipeline) as device:
+    while True:
+        qRgb = device.getOutputQueue(name="rgb", maxSize=4, blocking=False)
+        inRgb = qRgb.get()
+        frame = rescale(inRgb.getCvFrame(),0.8)
+
+        results = model(frame)
+
+        if len(results[0].boxes) > 0:
+            bbx = results[0].boxes.cpu().numpy().xywh
+            if bbx.shape[0] > 0:
+                x, y, w, h = bbx[0]
+                cv.rectangle(results[0].orig_img, (int(x-w/2), int(y-h/2)),
+                             (int(x+w/2), int(y+h/2)), (0, 255, 0), 2)
+            else:
+                pass
         else:
             pass
-    else:
-        pass
-    cv.imshow('Test', results[0].orig_img)
 
-    if cv.waitKey(1) & 0xFF == ord('q'):
-        break
+        cv.imshow('Test', results[0].orig_img)
+        cv.waitKey(3)
 
-capture.release()
-cv.destroyAllWindows()
+        if cv.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cv.destroyAllWindows()
